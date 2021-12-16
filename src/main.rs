@@ -36,6 +36,9 @@ enum Intrinsic {
     NE,
     Dup,
     Drop,
+    Swap,
+    Rot,
+    Over,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -92,6 +95,9 @@ fn parse(input: &VecDeque<Token>) -> VecDeque<Op> {
         "!=".to_string() => Op::Int(Intrinsic::NE),
         ":".to_string() => Op::Int(Intrinsic::Dup),
         ";".to_string() => Op::Int(Intrinsic::Drop),
+        "..".to_string() => Op::Int(Intrinsic::Swap),
+        ",,".to_string() => Op::Int(Intrinsic::Rot),
+        "^".to_string() => Op::Int(Intrinsic::Over),
         "?".to_string() => Op::Cond,
         "@".to_string() => Op::Zaloop,
         "{".to_string() => Op::BStart(0, 0),
@@ -152,7 +158,7 @@ fn compute(ops: VecDeque<Op>) -> Result<VecDeque<i64>, String> {
         match op {
             Op::Push(n) => stack.push_back(n),
             Op::Cond => {
-                let the_thing = stack.pop_back().unwrap();
+                let the_thing = stack.pop_back().expect("Zero things to condition!");
                 if the_thing != 0 {
                     stack.push_back(1);
                 }else{
@@ -160,7 +166,7 @@ fn compute(ops: VecDeque<Op>) -> Result<VecDeque<i64>, String> {
                 }
             }
             Op::BStart(el, en) => {
-                let cond = stack.pop_back().unwrap();
+                let cond = stack.pop_back().expect("Condition is nonexistant!");
                 if cond == 0 {
                     idx = if el == idx { en } else { el };
                     curr_loop.pop_back();
@@ -175,7 +181,7 @@ fn compute(ops: VecDeque<Op>) -> Result<VecDeque<i64>, String> {
                 }
             }
             Op::Zaloop => {
-                let the_thing = stack.pop_back().unwrap();
+                let the_thing = stack.pop_back().expect("Nothing to loop around!");
                 if the_thing != 0 {
                     stack.push_back(1);
                 }else{
@@ -241,13 +247,31 @@ fn compute(ops: VecDeque<Op>) -> Result<VecDeque<i64>, String> {
                         stack.push_back((a != b) as i64);
                     }
                     Intrinsic::Dup => {
-                        stack.push_back(*stack.back().unwrap());
+                        stack.push_back(*stack.back().expect("Nothing to dup!"));
                     }
                     Intrinsic::Drop => {
                         if stack.len() < 1 {
                             panic!("Stack is too small to die!");
                         }
                         stack.pop_back();
+                    }
+                    Intrinsic::Swap => {
+                        let (a, b) = pop2();
+                        stack.push_back(a);
+                        stack.push_back(b);
+                    }
+                    Intrinsic::Over => {
+                        let (a, b) = pop2();
+                        stack.push_back(b);
+                        stack.push_back(a);
+                        stack.push_back(b);
+                    }
+                    Intrinsic::Rot => {
+                        let (a, b) = pop2();
+                        let c = stack.pop_back().expect("Over_loaded!");
+                        stack.push_back(b);
+                        stack.push_back(a);
+                        stack.push_back(c);
                     }
                 }
             }
