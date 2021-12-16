@@ -43,6 +43,7 @@ enum Op {
     Push(i64),
     Int(Intrinsic),
     Cond,
+    Zaloop,
     BStart(usize, usize),
     BElse(usize, usize),
     BEnd(usize),
@@ -92,6 +93,7 @@ fn parse(input: &VecDeque<Token>) -> VecDeque<Op> {
         ":".to_string() => Op::Int(Intrinsic::Dup),
         ";".to_string() => Op::Int(Intrinsic::Drop),
         "?".to_string() => Op::Cond,
+        "@".to_string() => Op::Zaloop,
         "{".to_string() => Op::BStart(0, 0),
         "}{".to_string() => Op::BElse(0, 0),
         "}".to_string() => Op::BEnd(0)
@@ -104,6 +106,9 @@ fn parse(input: &VecDeque<Token>) -> VecDeque<Op> {
                 idx += 1;
             }
             Token::Word(w) => {
+                if w.is_empty() {
+                    continue;
+                }
                 let op = ops.get(w).unwrap();
                 match op {
                     Op::BStart(_, _) => {
@@ -123,7 +128,7 @@ fn parse(input: &VecDeque<Token>) -> VecDeque<Op> {
                             res[o] = Op::BStart(bi, idx);
                             res.push_back(Op::BEnd(bi))
                         }
-                        if let Op::BStart(o, _) = res[bi] {
+                        if let Op::BStart(_, _) = res[bi] {
                             res[bi] = Op::BStart(bi, idx);
                             res.push_back(Op::BEnd(bi))
                         }
@@ -137,86 +142,119 @@ fn parse(input: &VecDeque<Token>) -> VecDeque<Op> {
     res
 }
 
-fn compute(tokens: VecDeque<Token>) -> Result<VecDeque<i64>, String> {
+fn compute(ops: VecDeque<Op>) -> Result<VecDeque<i64>, String> {
     let mut stack = VecDeque::<i64>::new();
-    let math_ops = vec!["+", "-", "*", "/", "%", "<", ">", "<=", ">=", "==", "!="];
-    let stack_ops = vec![":", ";"];
-    for tok in tokens.iter() {
-        match tok {
-            Token::Number(n) => stack.push_back(*n),
-            Token::Word(w) => {
-                if math_ops.contains(&w.as_str()) {
-                    if stack.len() < 2 {
-                        return Err("We fucked up!".to_string());
-                    }
-                    let a = stack.pop_back().unwrap();
-                    let b = stack.pop_back().unwrap();
-                    stack.push_back(match w.as_str() {
-                        "+" => a + b,
-                        "-" => b - a,
-                        "*" => a * b,
-                        "/" => b / a,
-                        "%" => b % a,
-                        "<" => {
-                            if b < a {
-                                1
-                            } else {
-                                0
-                            }
-                        }
-                        ">" => {
-                            if b > a {
-                                1
-                            } else {
-                                0
-                            }
-                        }
-                        "<=" => {
-                            if b <= a {
-                                1
-                            } else {
-                                0
-                            }
-                        }
-                        ">=" => {
-                            if b >= a {
-                                1
-                            } else {
-                                0
-                            }
-                        }
-                        "!=" => {
-                            if b != a {
-                                1
-                            } else {
-                                0
-                            }
-                        }
-                        "==" => {
-                            if b == a {
-                                1
-                            } else {
-                                0
-                            }
-                        }
-                        _ => return Err("Unknown op".to_string()),
-                    });
+    let mut idx = 0usize;
+    let mut curr_loop = VecDeque::<usize>::new();
+    while idx < ops.len() {
+        let op = ops[idx];
+        println!("{:?} {:?} {:?}", stack, op, curr_loop);
+        match op {
+            Op::Push(n) => stack.push_back(n),
+            Op::Cond => {
+                let the_thing = stack.pop_back().unwrap();
+                if the_thing != 0 {
+                    stack.push_back(1);
+                }else{
+                    stack.push_back(0);
                 }
-                if stack_ops.contains(&w.as_str()) {
-                    if stack.len() < 1 {
-                        return Err("We fucked up!".to_string());
+            }
+            Op::BStart(el, en) => {
+                let cond = stack.pop_back().unwrap();
+                if cond == 0 {
+                    idx = if el == idx { en } else { el };
+                    curr_loop.pop_back();
+                }
+            }
+            Op::BElse(_, en) => {
+                idx = en;
+            }
+            Op::BEnd(_) => {
+                if let Some(lidx) = curr_loop.back() {
+                   idx = lidx - 1
+                }
+            }
+            Op::Zaloop => {
+                let the_thing = stack.pop_back().unwrap();
+                if the_thing != 0 {
+                    stack.push_back(1);
+                }else{
+                    stack.push_back(0);
+                }
+                if let Some(lidx) = curr_loop.back() {
+                    if *lidx != idx {
+                        curr_loop.push_back(idx);
                     }
-                    match w.as_str() {
-                        ":" => stack.push_back(*stack.back().unwrap()),
-                        ";" => {
-                            stack.pop_back().unwrap();
+                }else{
+                    curr_loop.push_back(idx);
+                }
+            }
+            Op::Int(i) => {
+                let mut pop2 = || {
+                    let a = stack.pop_back().expect("Even less parameters");
+                    let b = stack.pop_back().expect("Too little parameters");
+                    (a, b)
+                };
+                match i {
+                    Intrinsic::Add => {
+                        let (a,b) = pop2();
+                        stack.push_back(a + b);
+                    }
+                    Intrinsic::Mult => {
+                        let (a,b) = pop2();
+                        stack.push_back(a * b);
+                    }
+                    Intrinsic::Sub => {
+                        let (a,b) = pop2();
+                        stack.push_back(a - b);
+                    }
+                    Intrinsic::Div => {
+                        let (a,b) = pop2();
+                        stack.push_back(a / b);
+                    }
+                    Intrinsic::Mod => {
+                        let (a,b) = pop2();
+                        stack.push_back(a % b);
+                    }
+                    Intrinsic::LT => {
+                        let (a,b) = pop2();
+                        stack.push_back((a < b) as i64);
+                    }
+                    Intrinsic::GT => {
+                        let (a,b) = pop2();
+                        stack.push_back((a > b) as i64);
+                    }
+                    Intrinsic::LE => {
+                        let (a,b) = pop2();
+                        stack.push_back((a <= b) as i64);
+                    }
+                    Intrinsic::GE => {
+                        let (a,b) = pop2();
+                        stack.push_back((a >= b) as i64);
+                    }
+                    Intrinsic::EQ => {
+                        let (a,b) = pop2();
+                        stack.push_back((a == b) as i64);
+                    }
+                    Intrinsic::NE => {
+                        let (a,b) = pop2();
+                        stack.push_back((a != b) as i64);
+                    }
+                    Intrinsic::Dup => {
+                        stack.push_back(*stack.back().unwrap());
+                    }
+                    Intrinsic::Drop => {
+                        if stack.len() < 1 {
+                            panic!("Stack is too small to die!");
                         }
-                        _ => return Err("Unknown op".to_string()),
+                        stack.pop_back();
                     }
                 }
             }
         }
+        idx += 1;
     }
+    println!("{:?} {:?}", stack, curr_loop);
     Ok(stack)
 }
 
@@ -227,7 +265,7 @@ fn main() {
         .about("Simple programming language")
         .arg(
             Arg::new("INPUT")
-                .about("Sets the input file to use")
+                .help("Input file")
                 .required(true)
                 .index(1),
         )
@@ -235,7 +273,8 @@ fn main() {
     if let Some(i) = matches.value_of("INPUT") {
         let content = std::fs::read_to_string(i).unwrap();
         let res = lex(&content);
+        let res2 = parse(&res);
         println!("{:?}", parse(&res));
-        println!("{:?}", compute(res));
+        println!("{:?}", compute(res2));
     }
 }
